@@ -1,0 +1,51 @@
+name: macOS Build (AU + VST3)
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "Konfigurieren (Universal: Apple Silicon + Intel)"
+        run: >
+          cmake -B build -G Xcode
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      - name: Kompilieren
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Ad-hoc signieren
+        run: |
+          cd build/KlangbildFuzz_artefacts/Release
+          codesign --force --deep --sign - "AU/Klangbild Fuzz.component"
+          codesign --force --deep --sign - "VST3/Klangbild Fuzz.vst3"
+          codesign --force --deep --sign - "Standalone/Klangbild Fuzz.app"
+
+      - name: Paket schnüren
+        run: |
+          mkdir -p dist
+          cd build/KlangbildFuzz_artefacts/Release
+          ditto -c -k --sequesterRsrc --keepParent "AU/Klangbild Fuzz.component"  "$GITHUB_WORKSPACE/dist/Klangbild-Fuzz-AU.zip"
+          ditto -c -k --sequesterRsrc --keepParent "VST3/Klangbild Fuzz.vst3"      "$GITHUB_WORKSPACE/dist/Klangbild-Fuzz-VST3.zip"
+          ditto -c -k --sequesterRsrc --keepParent "Standalone/Klangbild Fuzz.app" "$GITHUB_WORKSPACE/dist/Klangbild-Fuzz-Standalone.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Klangbild-Fuzz-macOS
+          path: dist/
+
+      # Apples offizieller AU-Test (derselbe, den Logic Pro beim Scannen macht)
+      - name: AU-Validierung (auval)
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R "build/KlangbildFuzz_artefacts/Release/AU/Klangbild Fuzz.component" ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          sleep 3
+          auval -v aufx Kbfz Klbd
